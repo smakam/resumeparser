@@ -1,0 +1,30 @@
+John Doe
+Senior Software Engineer
+San Francisco, CA
+john.doe@example.com | (555) 123-4567
+
+Summary:
+10+ years designing scalable backend systems and leading cross-functional teams.
+
+Experience:
+Acme Corp — Staff Engineer (2019-2024)
+- Led migration to microservices, reducing latency by 30%.
+- Mentored 6 engineers and drove adoption of Kubernetes.
+
+Globex Inc — Senior Engineer (2014-2019)
+- Built data ingestion pipelines processing 5TB/day.
+- Introduced automated testing, cutting regressions by 40%.
+
+Education:
+MS Computer Science, Stanford University, 2013
+BS Computer Engineering, UCLA, 2011
+
+Skills:
+Python, Go, Kubernetes, AWS, PostgreSQL, Terraform, Leadership, Mentoring
+
+Certifications:
+AWS Solutions Architect Professional
+
+Awards:
+Acme Innovation Award 2022
+
