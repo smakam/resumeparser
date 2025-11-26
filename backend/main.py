@@ -1,10 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from typing import Optional, List
 import asyncio
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
 import sys
 from pathlib import Path
@@ -116,6 +118,11 @@ async def parse_resume_endpoint(
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy"}
+
+# Serve frontend static files if they exist (for combined deployment)
+frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
