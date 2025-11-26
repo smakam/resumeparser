@@ -14,6 +14,7 @@ Railway no longer offers a free tier. Here are the best **FREE** options:
 ### Deploy Both on Render
 
 1. **Backend Service**:
+
    - Go to [render.com](https://render.com) → Sign up
    - **New** → **Web Service**
    - Connect GitHub → Select `smakam/resumeparser`
@@ -160,12 +161,14 @@ Railway no longer offers a free tier. Here are the best **FREE** options:
 ## Quick Comparison
 
 ### Render for Both (Recommended for Simplicity)
+
 - ✅ Simplest setup (one platform)
 - ✅ Easy management
 - ⏰ Both sleep after 15 min (acceptable for most projects)
 - **Best for**: Personal projects, MVPs, demos
 
 ### Render + Vercel (Recommended for Performance)
+
 - ✅ Frontend never sleeps (always fast)
 - ✅ Better user experience
 - ⚠️ Two platforms to manage
