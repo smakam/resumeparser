@@ -95,7 +95,6 @@ class ResumeData(BaseModel):
 
 class ModelProvider(str, Enum):
     OPENAI = "openai"
-    GEMINI = "gemini"
 
 
 class ModelSpec(BaseModel):

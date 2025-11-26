@@ -7,8 +7,6 @@ from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
 
 # Load environment variables
 load_dotenv()
@@ -37,7 +35,6 @@ import re
 
 # Initialize OpenAI client (will use OPENAI_API_KEY from env)
 client = None
-_gemini_configured = False
 
 DEFAULT_MODEL_STRINGS = [
     "openai:gpt-4o",
@@ -48,11 +45,6 @@ MODEL_DISPLAY_NAMES = {
     "openai:gpt-4o": "GPT-4o",
     "openai:gpt-5.1": "GPT-5.1",
     "openai:gpt-5-preview": "GPT-5 Preview (if available)",
-    "gemini:gemini-3-pro-preview": "Gemini 3 Pro Preview (Paid tier)",
-    "gemini:gemini-2.5-pro": "Gemini 2.5 Pro",
-    "gemini:gemini-2.5-flash": "Gemini 2.5 Flash",
-    "gemini:gemini-1.5-pro": "Gemini 1.5 Pro",
-    "gemini:gemini-1.5-flash": "Gemini 1.5 Flash",
 }
 
 def get_client():
@@ -69,18 +61,6 @@ def get_client():
             max_retries=3
         )
     return client
-
-
-def ensure_gemini_client():
-    """Configure Gemini client lazily."""
-    global _gemini_configured
-    if _gemini_configured:
-        return
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key == "your_gemini_api_key_here":
-        raise ValueError("GEMINI_API_KEY not set. Please set it in backend/.env file")
-    genai.configure(api_key=api_key)
-    _gemini_configured = True
 
 
 def parse_model_string(model_str: str) -> ModelSpec:
@@ -254,42 +234,6 @@ def _call_openai(text: str, model_name: str) -> Dict[str, Any]:
     return parsed_json
 
 
-def _gemini_response_text(response) -> str:
-    if hasattr(response, "text") and response.text:
-        return response.text
-    candidates = getattr(response, "candidates", []) or []
-    texts: List[str] = []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        parts = getattr(content, "parts", []) if content else []
-        for part in parts:
-            text = getattr(part, "text", None)
-            if text:
-                texts.append(text)
-    if texts:
-        return "\n".join(texts)
-    raise ValueError("Gemini response did not contain text output")
-
-
-def _call_gemini(text: str, model_name: str) -> Dict[str, Any]:
-    ensure_gemini_client()
-    model = genai.GenerativeModel(model_name)
-    response = model.generate_content(
-        [
-            {"role": "system", "parts": [EXTRACTION_PROMPT]},
-            {"role": "user", "parts": [f"Parse this resume:\n\n{text}"]},
-        ],
-        generation_config=GenerationConfig(
-            temperature=0.1,
-            response_mime_type="application/json",
-        ),
-    )
-    content = _gemini_response_text(response)
-    content = _strip_code_fences(content)
-    parsed_json = json.loads(content)
-    return parsed_json
-
-
 async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
     """
     Run parsing for a single model/provider pair.
@@ -300,8 +244,6 @@ async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
     def _caller():
         if spec.provider == ModelProvider.OPENAI:
             return _call_openai(text, spec.model_name)
-        elif spec.provider == ModelProvider.GEMINI:
-            return _call_gemini(text, spec.model_name)
         else:
             raise ValueError(f"Unsupported provider {spec.provider}")
 
