@@ -61,21 +61,17 @@ This guide covers deploying the Resume Parser to free tier hosting providers.
 4. **Update Frontend API URL**
    - Update `frontend/vite.config.js` to use environment variable for API proxy
 
-## Option 2: Railway.app (Alternative)
+## Option 2: Fly.io (Free Tier Available)
 
 ### Backend
 
-1. Sign up at [railway.app](https://railway.app)
-2. Create new project from GitHub
-3. Add Python service
-4. Set environment variables
-5. Railway auto-detects FastAPI and deploys
+1. Install Fly CLI: `curl -L https://fly.io/install.sh | sh`
+2. Login: `fly auth login`
+3. Initialize: `fly launch` in project root
+4. Set secrets: `fly secrets set OPENAI_API_KEY=your_key`
+5. Deploy: `fly deploy`
 
-### Frontend
-
-1. Add static site service
-2. Point to `frontend/dist` after build
-3. Set environment variables
+**Note**: Railway no longer has a free tier. See `FREE_DEPLOYMENT.md` for free options.
 
 ## Option 3: Fly.io (Alternative)
 

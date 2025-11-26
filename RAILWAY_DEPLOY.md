@@ -1,6 +1,8 @@
 # Railway Deployment Guide
 
-Deploy both frontend and backend on Railway in one project.
+**Note**: Railway no longer offers a free tier. For free hosting, see `DEPLOYMENT.md` for Render + Vercel option.
+
+Deploy both frontend and backend on Railway in one project (paid tier required).
 
 ## Step 1: Create Railway Account
 
@@ -19,6 +21,7 @@ Deploy both frontend and backend on Railway in one project.
 Railway will create a service automatically. Configure it:
 
 1. **Settings → Deploy**
+
    - **Root Directory**: Leave empty (project root)
    - **Build Command**: `pip install -r requirements.txt && cd frontend && npm install && npm run build`
    - **Start Command**: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
@@ -63,11 +66,13 @@ cd frontend/dist && python -m http.server 3000
 ## Environment Variables Summary
 
 ### Backend Service
+
 - `OPENAI_API_KEY` - Your OpenAI API key
 - `ALLOWED_ORIGINS` - Frontend URL (or `*` for all)
 - `PORT` - Auto-set by Railway
 
 ### Frontend Service (Static Files)
+
 - `VITE_API_URL` - Backend service URL
 
 ## Troubleshooting
@@ -90,4 +95,3 @@ cd frontend/dist && python -m http.server 3000
 2. Test resume upload
 3. Check Railway logs if issues occur
 4. Monitor usage in Railway dashboard
-
