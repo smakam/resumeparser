@@ -9,3 +9,5 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: 3.12.0
+      - key: PIP_ONLY_BINARY
+        value: pydantic-core
