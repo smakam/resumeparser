@@ -14,11 +14,6 @@ const MODEL_OPTIONS = [
     badge: "HF",
   },
   {
-    id: "huggingface:deepseek-ai/DeepSeek-V3.1",
-    label: "DeepSeek-V3.1 (Alt) (Hugging Face)",
-    badge: "HF",
-  },
-  {
     id: "huggingface:Qwen/Qwen3-235B-A22B",
     label: "Qwen3-235B-A22B (Hugging Face)",
   },

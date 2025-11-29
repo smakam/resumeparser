@@ -47,7 +47,6 @@ MODEL_DISPLAY_NAMES = {
     "openai:gpt-5.1": "GPT-5.1",
     "openai:gpt-5-preview": "GPT-5 Preview (if available)",
     "huggingface:deepseek-ai/DeepSeek-V3": "DeepSeek-V3.1",
-    "huggingface:deepseek-ai/DeepSeek-V3.1": "DeepSeek-V3.1",
     "huggingface:Qwen/Qwen3-235B-A22B": "Qwen3-235B-A22B",
 }
 
