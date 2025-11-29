@@ -95,6 +95,7 @@ class ResumeData(BaseModel):
 
 class ModelProvider(str, Enum):
     OPENAI = "openai"
+    HUGGINGFACE = "huggingface"
 
 
 class ModelSpec(BaseModel):

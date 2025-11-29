@@ -8,6 +8,20 @@ const MODEL_OPTIONS = [
     label: "GPT-5.1 (OpenAI)*",
     badge: "New",
   },
+  {
+    id: "huggingface:deepseek-ai/DeepSeek-V3",
+    label: "DeepSeek-V3.1 (Hugging Face)",
+    badge: "HF",
+  },
+  {
+    id: "huggingface:deepseek-ai/DeepSeek-V3.1",
+    label: "DeepSeek-V3.1 (Alt) (Hugging Face)",
+    badge: "HF",
+  },
+  {
+    id: "huggingface:Qwen/Qwen3-235B-A22B",
+    label: "Qwen3-235B-A22B (Hugging Face)",
+  },
 ];
 
 function ModelSelector({ selectedModels, onChange }) {
@@ -52,7 +66,8 @@ function ModelSelector({ selectedModels, onChange }) {
         ))}
       </div>
       <p className="model-note">
-        * GPT-5.1 availability depends on your OpenAI account.
+        * GPT-5.1 availability depends on your OpenAI account. Hugging Face
+        models require HUGGINGFACE_API_KEY in backend/.env.
       </p>
     </div>
   );

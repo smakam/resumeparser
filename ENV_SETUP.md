@@ -11,8 +11,8 @@ touch .env
 2. Add your API keys:
 ```
 OPENAI_API_KEY=your_openai_api_key_here
-# Optional: unlock Gemini comparison
-GEMINI_API_KEY=your_gemini_api_key_here
+# Optional: Hugging Face models
+HUGGINGFACE_API_KEY=your_huggingface_token_here
 ```
 
 3. Install dependencies:
@@ -49,7 +49,7 @@ npm run dev
 1. Start the backend server (port 8000)
 2. Start the frontend server (port 3000)
 3. Open http://localhost:3000 in your browser
-4. Choose which models to run (GPT-4o, GPT-5 preview, Gemini 3) via the checkboxes
+4. Choose which models to run (GPT-4o, GPT-5.1, DeepSeek-V3.1, Qwen3-235B-A22B) via the checkboxes
 5. Upload a resume file (PDF, DOC, DOCX, or TXT)
 
 

@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -45,6 +46,9 @@ MODEL_DISPLAY_NAMES = {
     "openai:gpt-4o": "GPT-4o",
     "openai:gpt-5.1": "GPT-5.1",
     "openai:gpt-5-preview": "GPT-5 Preview (if available)",
+    "huggingface:deepseek-ai/DeepSeek-V3": "DeepSeek-V3.1",
+    "huggingface:deepseek-ai/DeepSeek-V3.1": "DeepSeek-V3.1",
+    "huggingface:Qwen/Qwen3-235B-A22B": "Qwen3-235B-A22B",
 }
 
 def get_client():
@@ -234,6 +238,53 @@ def _call_openai(text: str, model_name: str) -> Dict[str, Any]:
     return parsed_json
 
 
+def _call_huggingface(text: str, model_name: str) -> Dict[str, Any]:
+    """
+    Call Hugging Face Inference API for resume parsing.
+    """
+    api_key = os.getenv("HUGGINGFACE_API_KEY")
+    if not api_key or api_key == "your_huggingface_token_here":
+        raise ValueError("HUGGINGFACE_API_KEY not set. Please set it in backend/.env file")
+    
+    # Construct the full prompt
+    full_prompt = f"{EXTRACTION_PROMPT}\n\nParse this resume:\n\n{text}"
+    
+    # Hugging Face Inference API endpoint
+    api_url = f"https://api-inference.huggingface.co/models/{model_name}"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    payload = {
+        "inputs": full_prompt,
+        "parameters": {
+            "temperature": 0.1,
+            "max_new_tokens": 4000,
+            "return_full_text": False,
+        }
+    }
+    
+    response = requests.post(api_url, headers=headers, json=payload, timeout=120)
+    response.raise_for_status()
+    
+    result = response.json()
+    
+    # Handle different response formats from Hugging Face
+    if isinstance(result, list) and len(result) > 0:
+        generated_text = result[0].get("generated_text", "")
+    elif isinstance(result, dict):
+        generated_text = result.get("generated_text", "")
+    else:
+        generated_text = str(result)
+    
+    # Clean and parse JSON
+    content = _strip_code_fences(generated_text)
+    parsed_json = json.loads(content)
+    return parsed_json
+
+
 async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
     """
     Run parsing for a single model/provider pair.
@@ -244,6 +295,8 @@ async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
     def _caller():
         if spec.provider == ModelProvider.OPENAI:
             return _call_openai(text, spec.model_name)
+        elif spec.provider == ModelProvider.HUGGINGFACE:
+            return _call_huggingface(text, spec.model_name)
         else:
             raise ValueError(f"Unsupported provider {spec.provider}")
 
