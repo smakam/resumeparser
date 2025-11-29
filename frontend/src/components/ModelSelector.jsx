@@ -9,13 +9,19 @@ const MODEL_OPTIONS = [
     badge: "New",
   },
   {
-    id: "huggingface:deepseek-ai/DeepSeek-V3",
-    label: "DeepSeek-V3.1 (Hugging Face)",
+    id: "huggingface+together:deepseek-ai/DeepSeek-V3",
+    label: "DeepSeek-V3.1 (HF via Together)",
     badge: "HF",
   },
   {
-    id: "huggingface:Qwen/Qwen3-235B-A22B",
-    label: "Qwen3-235B-A22B (Hugging Face)",
+    id: "huggingface+fireworks-ai:Qwen/Qwen3-235B-A22B",
+    label: "Qwen3-235B-A22B (HF via Fireworks)",
+    badge: "HF",
+  },
+  {
+    id: "huggingface+groq:openai/gpt-oss-120b",
+    label: "GPT-OSS-120B (HF via Groq)",
+    badge: "Groq",
   },
 ];
 

@@ -4,7 +4,9 @@ import './ResumeDisplay.css'
 const MODEL_LABELS = {
   'openai:gpt-4o': 'GPT-4o',
   'openai:gpt-5-preview': 'GPT-5 Preview',
-  'gemini:gemini-1.5-pro-latest': 'Gemini 1.5 Pro'
+  'gemini:gemini-1.5-pro-latest': 'Gemini 1.5 Pro',
+  'huggingface:deepseek-ai/DeepSeek-R1-Distill-Llama-70B:groq': 'DeepSeek R1 (Groq)',
+  'huggingface:openai/gpt-oss-120b': 'GPT-OSS-120B'
 }
 
 function ResumeDisplay({ data }) {
@@ -56,11 +58,14 @@ function ResumeDisplay({ data }) {
   const renderModelHeader = (result) => {
     const key = `${result.provider}:${result.model_name}`
     const label = MODEL_LABELS[key] || result.model_name
+    const providerLabel = result.inference_provider
+      ? `${result.provider.toUpperCase()} (${result.inference_provider})`
+      : result.provider.toUpperCase()
     return (
       <div className="model-panel-header">
         <div>
           <span className="model-name">{label}</span>
-          <span className="model-provider">{result.provider.toUpperCase()}</span>
+          <span className="model-provider">{providerLabel}</span>
         </div>
         <div className="model-metrics">
           {typeof result.latency_ms === 'number' && (
@@ -87,16 +92,22 @@ function ResumeDisplay({ data }) {
     </div>
   )
 
-  if (!hasResults) {
-    return null
-  }
+  // if (!hasResults) {
+  //   return null
+  // }
 
   return (
     <div className="resume-display">
       <div className="display-header">
         <div>
           <h2>Parsed Resume Data</h2>
-          <p className="subtitle">Comparing {results.length} model{results.length > 1 ? 's' : ''}</p>
+          <p className="subtitle">
+            Comparing {results.length} model{results.length > 1 ? 's' : ''}{' '}
+            {results.length > 0 &&
+              `(providers: ${results
+                .map((r) => `${r.provider}${r.inference_provider ? `/${r.inference_provider}` : ''}`)
+                .join(', ')})`}
+          </p>
         </div>
         <div className="export-buttons">
           <button onClick={exportToJSON} className="export-btn">Export JSON</button>
@@ -370,7 +381,3 @@ function ResumeDisplay({ data }) {
 }
 
 export default ResumeDisplay
-
-
-
-

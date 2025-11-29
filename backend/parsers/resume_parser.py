@@ -6,11 +6,17 @@ from openai import OpenAI
 from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
+import logging
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
+import re
 
 # Load environment variables
 load_dotenv()
+
+# Use uvicorn's error logger so messages appear alongside server logs
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
 
 # Add backend directory to path
 backend_dir = Path(__file__).parent.parent
@@ -36,7 +42,6 @@ import re
 
 # Initialize OpenAI client (will use OPENAI_API_KEY from env)
 client = None
-_hf_client = None
 
 DEFAULT_MODEL_STRINGS = [
     "openai:gpt-4o",
@@ -49,6 +54,16 @@ MODEL_DISPLAY_NAMES = {
     "openai:gpt-5-preview": "GPT-5 Preview (if available)",
     "huggingface:deepseek-ai/DeepSeek-V3": "DeepSeek-V3.1",
     "huggingface:Qwen/Qwen3-235B-A22B": "Qwen3-235B-A22B",
+    "huggingface:openai/gpt-oss-120b": "GPT-OSS-120B",
+}
+
+# Some hosted models require a specific provider on Hugging Face Inference
+MODEL_PROVIDER_HINTS = {
+    "deepseek-ai/deepseek-v3": "together",
+    "deepseek-ai/deepseek-v3.1": "together",
+    "qwen/qwen3-235b-a22b": "fireworks-ai",
+    "qwen/qwen2.5-72b-instruct": "fireworks-ai",
+    "openai/gpt-oss-120b": "groq",
 }
 
 def get_client():
@@ -67,10 +82,39 @@ def get_client():
     return client
 
 
+def _normalize_provider_name(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    return PROVIDER_ALIASES.get(name.lower(), name)
+
+
+def get_hf_client(inference_provider: Optional[str] = None):
+    """
+    Build a fresh Hugging Face Inference client per call.
+    Some providers are not thread-safe, so we avoid sharing a global client across concurrent requests.
+    """
+    api_key = os.getenv("HUGGINGFACE_API_KEY")
+    if not api_key or api_key == "your_huggingface_token_here":
+        raise ValueError("HUGGINGFACE_API_KEY not set. Please set it in backend/.env file")
+
+    provider = _normalize_provider_name(inference_provider or os.getenv("HUGGINGFACE_PROVIDER"))
+    client_kwargs: Dict[str, Any] = {"token": api_key}
+    if provider:
+        client_kwargs["provider"] = provider
+
+    logger.info("Initializing Hugging Face InferenceClient with provider=%s", provider or "default")
+    try:
+        return InferenceClient(**client_kwargs)
+    except Exception as e:
+        logger.exception("Failed to initialize Hugging Face InferenceClient: %s", e)
+        raise
+
+
 def parse_model_string(model_str: str) -> ModelSpec:
     """
     Parse strings like 'openai:gpt-4o' into ModelSpec.
     Defaults to OpenAI if provider omitted.
+    You can specify a Hugging Face inference provider with 'huggingface+groq:model'.
     """
     if not model_str:
         raise ValueError("Empty model spec")
@@ -78,11 +122,23 @@ def parse_model_string(model_str: str) -> ModelSpec:
     if len(parts) == 1:
         provider = ModelProvider.OPENAI
         model_name = parts[0]
+        inference_provider = None
     else:
         provider_part, model_name = parts
-        provider = ModelProvider(provider_part.strip().lower())
+        provider_part = provider_part.strip().lower()
+        inference_provider = None
+        if provider_part.startswith("huggingface+"):
+            provider_part, inference_provider = provider_part.split("+", 1)
+            inference_provider = inference_provider.strip() or None
+        provider = ModelProvider(provider_part)
+
     display = MODEL_DISPLAY_NAMES.get(model_str.lower()) or model_name
-    return ModelSpec(provider=provider, model_name=model_name.strip(), display_name=display)
+    return ModelSpec(
+        provider=provider,
+        model_name=model_name.strip(),
+        display_name=display,
+        inference_provider=inference_provider,
+    )
 
 
 def parse_model_specs(models_param: Optional[str]) -> List[ModelSpec]:
@@ -213,7 +269,45 @@ def _strip_code_fences(content: str) -> str:
     return content.strip()
 
 
+LIST_FIELDS = [
+    "education",
+    "experience",
+    "certifications",
+    "awards",
+    "projects",
+    "patents",
+    "skills",
+    "languages",
+    "references",
+]
+
+
+PROVIDER_ALIASES = {
+    "fireworks": "fireworks-ai",
+    "fireworks_ai": "fireworks-ai",
+    "fireworks-ai": "fireworks-ai",
+    "hf": "hf-inference",
+    "huggingface": "hf-inference",
+}
+
+DEFAULT_HF_PROVIDER_PRIORITY = ["groq", "together", "fireworks-ai", "hf-inference"]
+
+
+def _normalize_parsed_json(parsed_json: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Guard against providers returning null/atoms for list fields by coercing to lists.
+    This avoids pydantic validation errors when multiple model results are aggregated.
+    """
+    for field in LIST_FIELDS:
+        if field not in parsed_json or parsed_json[field] is None:
+            parsed_json[field] = []
+        elif not isinstance(parsed_json[field], list):
+            parsed_json[field] = [parsed_json[field]]
+    return parsed_json
+
+
 def _json_to_resume(parsed_json: Dict[str, Any]) -> ResumeData:
+    parsed_json = _normalize_parsed_json(parsed_json)
     resume_data = ResumeData(**parsed_json)
     # Ensure confidence score is populated
     if not resume_data.confidence_score:
@@ -238,91 +332,159 @@ def _call_openai(text: str, model_name: str) -> Dict[str, Any]:
     return parsed_json
 
 
-def _call_huggingface(text: str, model_name: str) -> Dict[str, Any]:
-    """
-    Call Hugging Face Router API for resume parsing.
-    Based on: https://huggingface.co/docs/huggingface_hub/guides/inference
-    """
-    api_key = os.getenv("HUGGINGFACE_API_KEY")
-    if not api_key or api_key == "your_huggingface_token_here":
-        raise ValueError("HUGGINGFACE_API_KEY not set. Please set it in backend/.env file")
-    
-    # Construct the full prompt
+def _hf_chat_completion(text: str, model_name: str, provider_for_call: Optional[str]) -> Dict[str, Any]:
+    """Single chat completion attempt against a specific provider."""
+    logger.info("Calling Hugging Face model '%s' (provider=%s)", model_name, provider_for_call or "default")
+    hf_client = get_hf_client(inference_provider=provider_for_call)
+
     full_prompt = f"{EXTRACTION_PROMPT}\n\nParse this resume:\n\n{text}"
-    
-    # Try using InferenceClient first (it may work for some models)
+    supports_chat = (
+        hasattr(hf_client, "chat")
+        and hasattr(hf_client.chat, "completions")
+        and hasattr(getattr(hf_client.chat, "completions"), "create")
+    )
+
     try:
-        hf_client = InferenceClient(token=api_key)
-        generated_text = hf_client.text_generation(
-            full_prompt,
-            model=model_name,
-            max_new_tokens=4000,
-            temperature=0.1,
-            return_full_text=False,
-        )
-        if generated_text:
-            content = _strip_code_fences(generated_text)
-            parsed_json = json.loads(content)
-            return parsed_json
-    except Exception as e:
-        error_msg = str(e)
-        # If InferenceClient fails with 410, try router API directly
-        if "410" in error_msg or "Gone" in error_msg or "router" in error_msg.lower():
-            # Fall back to direct router API call
-            pass
-        else:
-            raise ValueError(f"Hugging Face API error: {error_msg}")
-    
-    # Fallback: Use router API directly with requests
-    import requests
-    api_url = f"https://router.huggingface.co/models/{model_name}"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    
-    payload = {
-        "inputs": full_prompt,
-        "parameters": {
-            "temperature": 0.1,
-            "max_new_tokens": 4000,
-            "return_full_text": False,
-        }
-    }
-    
-    try:
-        response = requests.post(api_url, headers=headers, json=payload, timeout=120)
-        
-        if response.status_code != 200:
-            error_msg = response.text
+        if not supports_chat:
             raise ValueError(
-                f"Hugging Face API error ({response.status_code}): {error_msg}. "
-                f"Note: Some models like {model_name} may require specific inference providers "
-                f"(e.g., Novita) or may not be available via the free router API."
+                "Hugging Face chat API is unavailable in this environment. "
+                "Upgrade huggingface_hub to >=0.23 and ensure the InferenceClient exposes chat.completions."
             )
-        
-        result = response.json()
-        
-        # Handle different response formats
-        generated_text = ""
-        if isinstance(result, list) and len(result) > 0:
-            generated_text = result[0].get("generated_text", "") or result[0].get("text", "")
-        elif isinstance(result, dict):
-            generated_text = result.get("generated_text", "") or result.get("text", "")
-        
-        if not generated_text:
-            raise ValueError(f"Empty response from Hugging Face API: {result}")
-        
-        # Clean and parse JSON
-        content = _strip_code_fences(generated_text)
+
+        response = hf_client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": EXTRACTION_PROMPT},
+                {"role": "user", "content": f"Parse this resume:\n\n{text}"},
+            ],
+            temperature=0.1,
+            max_tokens=4000,
+            response_format={"type": "json_object"},
+        )
+        logger.info("Hugging Face chat completion received for model '%s'", model_name)
+    except Exception as e:
+        msg = str(e)
+        hint = None
+        lowered = model_name.lower()
+        for key, provider_hint in MODEL_PROVIDER_HINTS.items():
+            if lowered.startswith(key):
+                hint = provider_hint
+                break
+
+        # Provide a clearer hint when a provider is required (e.g., Together/Fireworks)
+        if "provider" in msg.lower() or "not available on inference" in msg.lower() or hint:
+            suggestion = ""
+            if hint:
+                suggestion = f" Try setting HUGGINGFACE_PROVIDER='{hint}' for {model_name}."
+            logger.exception("Hugging Face call failed for model '%s': %s%s", model_name, msg, suggestion)
+            raise ValueError(
+                f"Hugging Face chat completion failed: {msg}. "
+                "Set HUGGINGFACE_PROVIDER to a supported provider (e.g., 'together', 'fireworks')."
+                + suggestion
+            ) from e
+        logger.exception("Hugging Face call failed for model '%s': %s", model_name, msg)
+        raise ValueError(f"Hugging Face chat completion failed: {msg}") from e
+
+    content = response.choices[0].message.content
+
+    if isinstance(content, list):
+        # Providers may return a list of content parts; join text portions only
+        content = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+
+    if not isinstance(content, str):
+        raise ValueError(f"Unexpected Hugging Face response format: {content}")
+
+    content = _strip_code_fences(content)
+
+    try:
         parsed_json = json.loads(content)
-        return parsed_json
-        
-    except requests.exceptions.RequestException as e:
-        raise ValueError(f"Hugging Face API request failed: {str(e)}")
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON from Hugging Face response: {str(e)}")
+        # Try to recover by extracting the first JSON object in the text
+        logger.warning("JSON parse failed for Hugging Face response from '%s'; attempting to recover", model_name)
+        # Remove think blocks that some models prepend
+        content_no_think = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        if content_no_think != content:
+            try:
+                parsed_json = json.loads(content_no_think)
+                logger.info("Recovered JSON from Hugging Face response for model '%s' after stripping <think>", model_name)
+                return parsed_json
+            except json.JSONDecodeError:
+                content = content_no_think
+        # Strategy 1: take the substring from first '{' to last '}' (helps if trailing text is appended)
+        first = content.find("{")
+        last = content.rfind("}")
+        if first != -1 and last != -1 and last > first:
+            candidate = content[first : last + 1]
+            try:
+                parsed_json = json.loads(candidate)
+                logger.info("Recovered JSON from Hugging Face response for model '%s' using bracket slice", model_name)
+                return parsed_json
+            except json.JSONDecodeError:
+                pass
+
+        # Strategy 2: regex for the first JSON-like object
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                parsed_json = json.loads(match.group(0))
+                logger.info("Recovered JSON from Hugging Face response for model '%s' using regex extract", model_name)
+                return parsed_json
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(
+            f"Failed to parse JSON from Hugging Face response. Raw content (truncated): {content[:500]}"
+        ) from e
+
+    return parsed_json
+
+
+def _call_huggingface(text: str, model_name: str, inference_provider: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Call Hugging Face Inference Client chat completions API with provider priority fallback.
+    Based on: https://huggingface.co/docs/inference-providers/en/tasks/chat-completion
+    """
+    candidates: List[Optional[str]] = []
+
+    def _add_candidate(p: Optional[str]):
+        p_norm = _normalize_provider_name(p)
+        if p_norm not in candidates:
+            candidates.append(p_norm)
+
+    # 1) Explicit provider from model string goes first
+    _add_candidate(inference_provider)
+
+    lowered = model_name.lower()
+    for key, provider_hint in MODEL_PROVIDER_HINTS.items():
+        if lowered.startswith(key):
+            _add_candidate(provider_hint)
+            break
+
+    # 3) Explicit env override for first pick
+    _add_candidate(os.getenv("HUGGINGFACE_PROVIDER"))
+
+    env_priority = os.getenv("HUGGINGFACE_PROVIDER_PRIORITY")
+    if env_priority:
+        for p in env_priority.split(","):
+            _add_candidate(p.strip())
+    else:
+        for p in DEFAULT_HF_PROVIDER_PRIORITY:
+            _add_candidate(p)
+
+    _add_candidate(None)
+
+    errors: List[str] = []
+    for provider in candidates:
+        try:
+            return _hf_chat_completion(text, model_name, provider)
+        except ValueError as e:
+            errors.append(f"{provider or 'auto'}: {e}")
+            continue
+
+    raise ValueError(
+        f"All Hugging Face provider attempts failed for {model_name}. "
+        f"Tried: {', '.join(str(p or 'auto') for p in candidates)}. "
+        f"Errors: {' | '.join(errors)}"
+    )
 
 
 async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
@@ -336,7 +498,7 @@ async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
         if spec.provider == ModelProvider.OPENAI:
             return _call_openai(text, spec.model_name)
         elif spec.provider == ModelProvider.HUGGINGFACE:
-            return _call_huggingface(text, spec.model_name)
+            return _call_huggingface(text, spec.model_name, spec.inference_provider)
         else:
             raise ValueError(f"Unsupported provider {spec.provider}")
 
@@ -459,4 +621,3 @@ def calculate_confidence_score(resume_data: ResumeData) -> float:
         normalized = 0.85 + (normalized - 0.7) * 0.5
     
     return min(normalized, 1.0)
-

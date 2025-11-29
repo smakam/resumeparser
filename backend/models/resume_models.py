@@ -102,6 +102,8 @@ class ModelSpec(BaseModel):
     provider: ModelProvider
     model_name: str
     display_name: Optional[str] = None
+    # For Hugging Face models, optionally specify the inference provider (e.g., groq, together, fireworks)
+    inference_provider: Optional[str] = None
 
 
 class ParsedModelResult(BaseModel):

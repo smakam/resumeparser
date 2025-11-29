@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from typing import Optional, List
 import asyncio
 import os
+import logging
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from models.resume_models import ParseResponse, ModelError
 load_dotenv()
 
 app = FastAPI(title="Resume Parser API")
+logger = logging.getLogger("uvicorn.error")
 
 # CORS middleware - allow all origins in production, specific in dev
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
@@ -88,6 +90,7 @@ async def parse_resume_endpoint(
         errors = []
         for spec, result in zip(model_specs, responses):
             if isinstance(result, Exception):
+                logger.error("Model call failed for provider=%s model=%s: %s", spec.provider, spec.model_name, result)
                 errors.append(
                     ModelError(
                         provider=spec.provider,
@@ -98,7 +101,14 @@ async def parse_resume_endpoint(
             else:
                 results.append(result)
 
-        if not results:
+        if not results and errors:
+            # Surface per-model errors instead of a generic 500 so clients can act on them
+            return JSONResponse(
+                status_code=502,
+                content=ParseResponse(results=[], errors=errors).model_dump(),
+            )
+        elif not results:
+            # No errors recorded (unexpected) but also no results
             raise HTTPException(
                 status_code=500,
                 detail="All model calls failed. Check API keys and model availability.",
@@ -106,6 +116,10 @@ async def parse_resume_endpoint(
         
         # Clean up temp file
         os.remove(temp_path)
+        
+        print(f"Returning {len(results)} results and {len(errors)} errors")
+        if results:
+            print(f"First result preview: {str(results[0])[:200]}...")
         
         return ParseResponse(results=results, errors=errors)
         
@@ -127,4 +141,3 @@ if frontend_dist.exists():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
