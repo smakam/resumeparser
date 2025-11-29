@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-import requests
+from huggingface_hub import InferenceClient
 
 # Load environment variables
 load_dotenv()
@@ -36,6 +36,7 @@ import re
 
 # Initialize OpenAI client (will use OPENAI_API_KEY from env)
 client = None
+_hf_client = None
 
 DEFAULT_MODEL_STRINGS = [
     "openai:gpt-4o",
@@ -237,46 +238,40 @@ def _call_openai(text: str, model_name: str) -> Dict[str, Any]:
     return parsed_json
 
 
+def get_hf_client():
+    """Lazy initialization of Hugging Face Inference client"""
+    global _hf_client
+    if _hf_client is None:
+        api_key = os.getenv("HUGGINGFACE_API_KEY")
+        if not api_key or api_key == "your_huggingface_token_here":
+            raise ValueError("HUGGINGFACE_API_KEY not set. Please set it in backend/.env file")
+        _hf_client = InferenceClient(token=api_key)
+    return _hf_client
+
+
 def _call_huggingface(text: str, model_name: str) -> Dict[str, Any]:
     """
-    Call Hugging Face Inference API for resume parsing.
+    Call Hugging Face Inference API for resume parsing using InferenceClient.
     """
-    api_key = os.getenv("HUGGINGFACE_API_KEY")
-    if not api_key or api_key == "your_huggingface_token_here":
-        raise ValueError("HUGGINGFACE_API_KEY not set. Please set it in backend/.env file")
+    hf_client = get_hf_client()
     
     # Construct the full prompt
     full_prompt = f"{EXTRACTION_PROMPT}\n\nParse this resume:\n\n{text}"
     
-    # Hugging Face Inference API endpoint
-    api_url = f"https://api-inference.huggingface.co/models/{model_name}"
+    try:
+        # Use text_generation with proper parameters
+        generated_text = hf_client.text_generation(
+            full_prompt,
+            model=model_name,
+            max_new_tokens=4000,
+            temperature=0.1,
+            return_full_text=False,
+        )
+    except Exception as e:
+        raise ValueError(f"Hugging Face API error: {str(e)}")
     
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    
-    payload = {
-        "inputs": full_prompt,
-        "parameters": {
-            "temperature": 0.1,
-            "max_new_tokens": 4000,
-            "return_full_text": False,
-        }
-    }
-    
-    response = requests.post(api_url, headers=headers, json=payload, timeout=120)
-    response.raise_for_status()
-    
-    result = response.json()
-    
-    # Handle different response formats from Hugging Face
-    if isinstance(result, list) and len(result) > 0:
-        generated_text = result[0].get("generated_text", "")
-    elif isinstance(result, dict):
-        generated_text = result.get("generated_text", "")
-    else:
-        generated_text = str(result)
+    if not generated_text:
+        raise ValueError("Empty response from Hugging Face API")
     
     # Clean and parse JSON
     content = _strip_code_fences(generated_text)
