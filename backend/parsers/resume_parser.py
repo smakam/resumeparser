@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-import requests
+from huggingface_hub import InferenceClient
 
 # Load environment variables
 load_dotenv()
@@ -36,6 +36,7 @@ import re
 
 # Initialize OpenAI client (will use OPENAI_API_KEY from env)
 client = None
+_hf_client = None
 
 DEFAULT_MODEL_STRINGS = [
     "openai:gpt-4o",
@@ -240,7 +241,7 @@ def _call_openai(text: str, model_name: str) -> Dict[str, Any]:
 def _call_huggingface(text: str, model_name: str) -> Dict[str, Any]:
     """
     Call Hugging Face Router API for resume parsing.
-    Uses the new router.huggingface.co endpoint.
+    Based on: https://huggingface.co/docs/huggingface_hub/guides/inference
     """
     api_key = os.getenv("HUGGINGFACE_API_KEY")
     if not api_key or api_key == "your_huggingface_token_here":
@@ -249,7 +250,31 @@ def _call_huggingface(text: str, model_name: str) -> Dict[str, Any]:
     # Construct the full prompt
     full_prompt = f"{EXTRACTION_PROMPT}\n\nParse this resume:\n\n{text}"
     
-    # Use Hugging Face Router API (new endpoint)
+    # Try using InferenceClient first (it may work for some models)
+    try:
+        hf_client = InferenceClient(token=api_key)
+        generated_text = hf_client.text_generation(
+            full_prompt,
+            model=model_name,
+            max_new_tokens=4000,
+            temperature=0.1,
+            return_full_text=False,
+        )
+        if generated_text:
+            content = _strip_code_fences(generated_text)
+            parsed_json = json.loads(content)
+            return parsed_json
+    except Exception as e:
+        error_msg = str(e)
+        # If InferenceClient fails with 410, try router API directly
+        if "410" in error_msg or "Gone" in error_msg or "router" in error_msg.lower():
+            # Fall back to direct router API call
+            pass
+        else:
+            raise ValueError(f"Hugging Face API error: {error_msg}")
+    
+    # Fallback: Use router API directly with requests
+    import requests
     api_url = f"https://router.huggingface.co/models/{model_name}"
     
     headers = {
@@ -269,14 +294,17 @@ def _call_huggingface(text: str, model_name: str) -> Dict[str, Any]:
     try:
         response = requests.post(api_url, headers=headers, json=payload, timeout=120)
         
-        # Check for errors
         if response.status_code != 200:
             error_msg = response.text
-            raise ValueError(f"Hugging Face API error ({response.status_code}): {error_msg}")
+            raise ValueError(
+                f"Hugging Face API error ({response.status_code}): {error_msg}. "
+                f"Note: Some models like {model_name} may require specific inference providers "
+                f"(e.g., Novita) or may not be available via the free router API."
+            )
         
         result = response.json()
         
-        # Handle different response formats from Hugging Face
+        # Handle different response formats
         generated_text = ""
         if isinstance(result, list) and len(result) > 0:
             generated_text = result[0].get("generated_text", "") or result[0].get("text", "")
