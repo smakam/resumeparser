@@ -9,6 +9,11 @@ const MODEL_OPTIONS = [
     badge: "New",
   },
   {
+    id: "gemini:gemini-3-pro-preview",
+    label: "Gemini 3 Pro Preview",
+    badge: "Gemini",
+  },
+  {
     id: "huggingface+together:deepseek-ai/DeepSeek-V3",
     label: "DeepSeek-V3.1 (HF via Together)",
     badge: "HF",

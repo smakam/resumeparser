@@ -5,6 +5,7 @@ const MODEL_LABELS = {
   'openai:gpt-4o': 'GPT-4o',
   'openai:gpt-5-preview': 'GPT-5 Preview',
   'gemini:gemini-1.5-pro-latest': 'Gemini 1.5 Pro',
+  'gemini:gemini-3-pro-preview': 'Gemini 3 Pro Preview',
   'huggingface:deepseek-ai/DeepSeek-R1-Distill-Llama-70B:groq': 'DeepSeek R1 (Groq)',
   'huggingface:openai/gpt-oss-120b': 'GPT-OSS-120B'
 }

@@ -9,6 +9,9 @@ from pathlib import Path
 import logging
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
+import google.generativeai as genai
+import google.auth
+import requests
 import re
 
 # Load environment variables
@@ -55,6 +58,7 @@ MODEL_DISPLAY_NAMES = {
     "huggingface:deepseek-ai/DeepSeek-V3": "DeepSeek-V3.1",
     "huggingface:Qwen/Qwen3-235B-A22B": "Qwen3-235B-A22B",
     "huggingface:openai/gpt-oss-120b": "GPT-OSS-120B",
+    "gemini:gemini-3-pro-preview": "Gemini 3 Pro Preview",
 }
 
 # Some hosted models require a specific provider on Hugging Face Inference
@@ -438,6 +442,59 @@ def _hf_chat_completion(text: str, model_name: str, provider_for_call: Optional[
     return parsed_json
 
 
+def _call_gemini(text: str, model_name: str) -> Dict[str, Any]:
+    def _parse_content_text(content: str, source: str) -> Dict[str, Any]:
+        content = content or ""
+        content_clean = _strip_code_fences(content)
+        if not content_clean:
+            raise ValueError(f"Empty response from Gemini ({source})")
+        try:
+            return json.loads(content_clean)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Failed to parse JSON from Gemini response ({source}). Raw content (truncated): {content_clean[:500]}"
+            ) from e
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key or api_key == "your_gemini_api_key_here":
+        raise ValueError("GEMINI_API_KEY not set. Please set it in backend/.env file")
+
+    logger.info("Gemini API key call to %s via Vertex REST", model_name)
+    try:
+        endpoint = f"https://aiplatform.googleapis.com/v1/publishers/google/models/{model_name}:generateContent"
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"Parse this resume:\n\n{text}"}],
+                }
+            ],
+            "system_instruction": {"parts": [{"text": EXTRACTION_PROMPT}]},
+            "generation_config": {
+                "temperature": 0.1,
+                "response_mime_type": "application/json",
+            },
+        }
+        resp = requests.post(
+            f"{endpoint}?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=120,
+        )
+        logger.info("Gemini API key call status: %s", resp.status_code)
+        resp.raise_for_status()
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise ValueError(f"Empty candidates from Gemini ({data})")
+        text_parts = candidates[0].get("content", {}).get("parts", [])
+        combined = "".join(p.get("text", "") for p in text_parts if isinstance(p, dict))
+        return _parse_content_text(combined, "api-key")
+    except Exception as e:
+        logger.exception("Gemini API key call failed for model %s: %s", model_name, e)
+        raise ValueError(f"Gemini chat completion failed: {str(e)}") from e
+
+
 def _call_huggingface(text: str, model_name: str, inference_provider: Optional[str] = None) -> Dict[str, Any]:
     """
     Call Hugging Face Inference Client chat completions API with provider priority fallback.
@@ -499,6 +556,8 @@ async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
             return _call_openai(text, spec.model_name)
         elif spec.provider == ModelProvider.HUGGINGFACE:
             return _call_huggingface(text, spec.model_name, spec.inference_provider)
+        elif spec.provider == ModelProvider.GEMINI:
+            return _call_gemini(text, spec.model_name)
         else:
             raise ValueError(f"Unsupported provider {spec.provider}")
 
