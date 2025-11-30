@@ -54,7 +54,7 @@ DEFAULT_MODEL_STRINGS = [
 # Approximate $/1k token rates for cost estimation (update as needed)
 MODEL_RATES_USD = {
     ("openai", "gpt-4o", None): {"input": 0.005, "output": 0.015},
-    ("openai", "gpt-5.1", None): {"input": 0.015, "output": 0.06},
+    ("openai", "gpt-5.1", None): {"input": 0.003, "output": 0.01},
     ("gemini", "gemini-3-pro-preview", None): {"input": 0.001, "output": 0.005},
     # Hugging Face OSS via providers (per-model, per-provider)
     ("huggingface", "openai/gpt-oss-120b", "groq"): {"input": 0.00027, "output": 0.00027},  # $0.27 / 1M
