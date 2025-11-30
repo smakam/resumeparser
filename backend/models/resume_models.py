@@ -112,7 +112,9 @@ class ParsedModelResult(BaseModel):
     model_name: str
     resume: ResumeData
     confidence: Optional[float] = None
-    latency_ms: Optional[int] = None
+    latency_ms: Optional[int] = None  # end-to-end parse latency
+    api_latency_ms: Optional[int] = None  # model API call latency only
+    cost_usd: Optional[float] = None
     raw_response: Optional[Dict[str, Any]] = None
 
 

@@ -69,13 +69,19 @@ function ResumeDisplay({ data }) {
           <span className="model-provider">{providerLabel}</span>
         </div>
         <div className="model-metrics">
+          {typeof result.api_latency_ms === 'number' && (
+            <span className="metric-badge">Model: {result.api_latency_ms} ms</span>
+          )}
           {typeof result.latency_ms === 'number' && (
-            <span className="metric-badge">{result.latency_ms} ms</span>
+            <span className="metric-badge">Total: {result.latency_ms} ms</span>
           )}
           {typeof result.confidence === 'number' && (
             <span className="metric-badge metric-confidence">
               {(result.confidence * 100).toFixed(1)}% confidence
             </span>
+          )}
+          {typeof result.cost_usd === 'number' && (
+            <span className="metric-badge">~${result.cost_usd.toFixed(4)}</span>
           )}
         </div>
       </div>

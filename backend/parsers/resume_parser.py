@@ -51,6 +51,18 @@ DEFAULT_MODEL_STRINGS = [
     "openai:gpt-5.1",
 ]
 
+# Approximate $/1k token rates for cost estimation (update as needed)
+MODEL_RATES_USD = {
+    ("openai", "gpt-4o", None): {"input": 0.005, "output": 0.015},
+    ("openai", "gpt-5.1", None): {"input": 0.015, "output": 0.06},
+    ("gemini", "gemini-3-pro-preview", None): {"input": 0.001, "output": 0.005},
+    # Hugging Face OSS via providers (per-model, per-provider)
+    ("huggingface", "openai/gpt-oss-120b", "groq"): {"input": 0.00027, "output": 0.00027},  # $0.27 / 1M
+    ("huggingface", "deepseek-ai/deepseek-v3", "together"): {"input": 0.0003, "output": 0.0003},  # $0.20–0.40 / 1M
+    ("huggingface", "deepseek-ai/deepseek-v3.1", "together"): {"input": 0.0003, "output": 0.0003},
+    ("huggingface", "qwen/qwen3-235b-a22b", "fireworks-ai"): {"input": 0.00045, "output": 0.00045},  # $0.35–0.55 / 1M
+}
+
 MODEL_DISPLAY_NAMES = {
     "openai:gpt-4o": "GPT-4o",
     "openai:gpt-5.1": "GPT-5.1",
@@ -273,6 +285,11 @@ def _strip_code_fences(content: str) -> str:
     return content.strip()
 
 
+def _estimate_tokens_from_text(text: str) -> int:
+    # Rough heuristic: ~4 characters per token
+    return max(1, int(len(text) / 4))
+
+
 LIST_FIELDS = [
     "education",
     "experience",
@@ -317,6 +334,17 @@ def _json_to_resume(parsed_json: Dict[str, Any]) -> ResumeData:
     if not resume_data.confidence_score:
         resume_data.confidence_score = calculate_confidence_score(resume_data)
     return resume_data
+
+
+def _estimate_cost(provider: str, model_name: str, inference_provider: Optional[str], prompt_text: str, parsed_json: Dict[str, Any]) -> Optional[float]:
+    key = (provider.lower(), model_name.lower(), inference_provider.lower() if inference_provider else None)
+    rates = MODEL_RATES_USD.get(key)
+    if not rates:
+        return None
+    input_tokens = _estimate_tokens_from_text(prompt_text)
+    output_tokens = _estimate_tokens_from_text(json.dumps(parsed_json))
+    cost = (input_tokens / 1000.0) * rates["input"] + (output_tokens / 1000.0) * rates["output"]
+    return round(cost, 6)
 
 
 def _call_openai(text: str, model_name: str) -> Dict[str, Any]:
@@ -561,16 +589,25 @@ async def parse_with_model(text: str, spec: ModelSpec) -> ParsedModelResult:
         else:
             raise ValueError(f"Unsupported provider {spec.provider}")
 
+    api_start = time.perf_counter()
     parsed_json = await loop.run_in_executor(None, _caller)
+    api_latency_ms = int((time.perf_counter() - api_start) * 1000)
+
     resume = _json_to_resume(parsed_json)
-    latency_ms = int((time.perf_counter() - started) * 1000)
+    total_latency_ms = int((time.perf_counter() - started) * 1000)
+
+    # Estimate cost when rates are known
+    prompt_text = f"{EXTRACTION_PROMPT}\n\nParse this resume:\n\n{text}"
+    cost_usd = _estimate_cost(spec.provider.value, spec.model_name, spec.inference_provider, prompt_text, parsed_json)
 
     return ParsedModelResult(
         provider=spec.provider,
         model_name=spec.model_name,
         resume=resume,
         confidence=resume.confidence_score,
-        latency_ms=latency_ms,
+        latency_ms=total_latency_ms,
+        api_latency_ms=api_latency_ms,
+        cost_usd=cost_usd,
         raw_response=parsed_json,
     )
 
